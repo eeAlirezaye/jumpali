@@ -5,3 +5,5 @@ from .remove_account import *
 from .scan_account import *
 from .template import *
 from .verify_account import *
+from .secret_rotation import *
+from .risk_scan import *

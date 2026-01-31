@@ -30,6 +30,10 @@ router.register(r'check-account-executions', api.CheckAccountExecutionViewSet, '
 router.register(r'account-check-engines', api.CheckAccountEngineViewSet, 'account-check-engine')
 router.register(r'account-risks', api.AccountRiskViewSet, 'account-risks')
 router.register(r'integration-applications', api.IntegrationApplicationViewSet, 'integration-apps')
+router.register(r'risk/rules', api.RiskRuleViewSet, 'risk-rule')
+router.register(r'risk/findings', api.RiskFindingViewSet, 'risk-finding')
+router.register(r'rotations/policies', api.SecretRotationPolicyViewSet, 'secret-rotation-policy')
+router.register(r'rotations/jobs', api.SecretRotationJobViewSet, 'secret-rotation-job')
 
 urlpatterns = [
     path('accounts/bulk/', api.AssetAccountBulkCreateApi.as_view(), name='account-bulk-create'),
