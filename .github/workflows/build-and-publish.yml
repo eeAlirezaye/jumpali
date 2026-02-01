@@ -1,34 +1,102 @@
-deploy:
-  needs: build-and-push
-  runs-on: ubuntu-latest
-  steps:
-    - name: Start ssh-agent
-      uses: webfactory/ssh-agent@v0.8.1
-      with:
-        ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+name: Build and Deploy Jumpali
 
-    - name: Deploy core via docker compose override
-      env:
-        GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-        OWNER: ${{ github.repository_owner }}
-      run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
-          set -e
+on:
+  push:
+    branches:
+      - aliz
+      - "release/**"
+  workflow_dispatch: {}
 
-          echo \"\$GHCR_TOKEN\" | docker login ghcr.io -u \"\$GHCR_USERNAME\" --password-stdin
+permissions:
+  contents: read
+  packages: write
 
-          cd /opt/jumpserver-installer-v4.10.15/compose
+env:
+  # Hardcode lowercase to avoid GHCR path issues
+  GHCR_OWNER: eealirezaye
+  IMAGE_NAME: jumpali
+  REGISTRY: ghcr.io
 
-          cat > core.override.yml <<EOF
-          services:
-            core:
-              image: ghcr.io/${OWNER}/jumpali:latest
-              pull_policy: always
-          EOF
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-          docker compose -f core.yml -f core.override.yml pull core
-          docker compose -f core.yml -f core.override.yml up -d core
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-          docker ps --filter name=jms_core --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-        "
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Use GITHUB_TOKEN for GHCR push (recommended)
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.GHCR_OWNER }}/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.GHCR_OWNER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Deploy core via JumpServer compose override
+        env:
+          # Use a PAT that has read:packages (if package is private)
+          DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+            set -euo pipefail
+
+            # Login so the server can pull from GHCR
+            echo \"\$DEPLOY_GHCR_TOKEN\" | sudo docker login ghcr.io -u \"\$DEPLOY_GHCR_USERNAME\" --password-stdin
+
+            cd /opt/jumpserver-installer-v4.10.15/compose
+
+            # Write override to swap only the core image
+            sudo tee core.override.yml >/dev/null <<EOF
+            services:
+              core:
+                image: ghcr.io/${{ env.GHCR_OWNER }}/${{ env.IMAGE_NAME }}:${SHA}
+                pull_policy: always
+            EOF
+
+            # Pull + recreate core using correct env + network definition
+            sudo docker compose \
+              --env-file /opt/jumpserver/config/config.txt \
+              -f network.yml \
+              -f core.yml \
+              -f core.override.yml \
+              pull core
+
+            sudo docker compose \
+              --env-file /opt/jumpserver/config/config.txt \
+              -f network.yml \
+              -f core.yml \
+              -f core.override.yml \
+              up -d core
+
+            # Verify
+            sudo docker ps --filter name=jms_core --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+            sudo docker inspect jms_core --format '{{.Config.Image}}'
+          "
