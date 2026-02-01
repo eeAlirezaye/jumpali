@@ -3,6 +3,8 @@ name: Build and Deploy Jumpali
 on:
   push:
     branches:
+      - main
+      - master
       - aliz
       - "release/**"
   workflow_dispatch: {}
@@ -43,6 +45,8 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          build-args: |
+            VERSION=${{ github.sha }}
           tags: |
             ghcr.io/${{ env.GHCR_OWNER }}/${{ env.IMAGE_NAME }}:latest
             ghcr.io/${{ env.GHCR_OWNER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}

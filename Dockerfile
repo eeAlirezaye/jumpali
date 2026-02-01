@@ -12,10 +12,17 @@ RUN echo > /opt/jumpserver/config.yml \
         sed -i "s@VERSION = .*@VERSION = '${VERSION}'@g" apps/jumpserver/const.py; \
     fi
 
+# compilemessages needs msgfmt from gettext; install just for build stage
+RUN set -ex \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gettext \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN set -ex \
     && export SECRET_KEY=$(head -c100 < /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 48) \
     && . /opt/py3/bin/activate \
     && cd apps \
+    && python -m py_compile $(find accounts -name '*.py' ! -path \"*/migrations/*\") \
     && python manage.py compilemessages
 
 
